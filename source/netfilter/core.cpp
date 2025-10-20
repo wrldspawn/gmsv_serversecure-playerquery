@@ -678,48 +678,48 @@ private:
     lua->PushString(inet_ntoa(from.sin_addr));
     lua->PushNumber(27015);
 
-    lua->CallFunctionProtected(3, 1, true);
-
-    if (lua->IsType(-1, GarrysMod::Lua::Type::BOOL)) {
-      if (!lua->GetBool(-1)) {
+    if (lua->CallFunctionProtected(3, 1, true)) {
+      if (lua->IsType(-1, GarrysMod::Lua::Type::BOOL)) {
+        if (!lua->GetBool(-1)) {
+          newreply.senddefault = false;
+          newreply.dontsend = true; // dont send when return false
+        }
+      } else if (lua->IsType(-1, GarrysMod::Lua::Type::TABLE)) {
         newreply.senddefault = false;
-        newreply.dontsend = true; // dont send when return false
+
+        int count = lua->ObjLen(-1);
+        newreply.count = count;
+
+        std::vector<player_t> newPlayers(count);
+
+        for (int i = 0; i < count; i++) {
+          player_t newPlayer;
+          newPlayer.index = i;
+
+          lua->PushNumber(i + 1);
+          lua->GetTable(-2);
+
+          lua->GetField(-1, "name");
+          newPlayer.name = lua->GetString(-1);
+          lua->Pop(1);
+
+          lua->GetField(-1, "score");
+          newPlayer.score = lua->GetNumber(-1);
+          lua->Pop(1);
+
+          lua->GetField(-1, "time");
+          newPlayer.time = lua->GetNumber(-1);
+          lua->Pop(1);
+
+          lua->Pop(1);
+          newPlayers.at(i) = newPlayer;
+        }
+
+        newreply.players = newPlayers;
       }
-    } else if (lua->IsType(-1, GarrysMod::Lua::Type::TABLE)) {
-      newreply.senddefault = false;
 
-      int count = lua->ObjLen(-1);
-      newreply.count = count;
-
-      std::vector<player_t> newPlayers(count);
-
-      for (int i = 0; i < count; i++) {
-        player_t newPlayer;
-        newPlayer.index = i;
-
-        lua->PushNumber(i + 1);
-        lua->GetTable(-2);
-
-        lua->GetField(-1, "name");
-        newPlayer.name = lua->GetString(-1);
-        lua->Pop(1);
-
-        lua->GetField(-1, "score");
-        newPlayer.score = lua->GetNumber(-1);
-        lua->Pop(1);
-
-        lua->GetField(-1, "time");
-        newPlayer.time = lua->GetNumber(-1);
-        lua->Pop(1);
-
-        lua->Pop(1);
-        newPlayers.at(i) = newPlayer;
-      }
-
-      newreply.players = newPlayers;
+      lua->Pop(1);
     }
-
-    lua->Pop(1);
 
     return newreply;
   }
