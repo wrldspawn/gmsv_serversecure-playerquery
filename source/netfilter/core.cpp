@@ -113,8 +113,10 @@ public:
     std::vector<uint8_t> buffer;
   };
 
-  explicit Core(const char *game_version)
+  explicit Core(const char *game_version, GarrysMod::Lua::ILuaBase *LUA)
       : server(InterfacePointers::Server()) {
+
+    lua = static_cast<GarrysMod::Lua::ILuaInterface *>(LUA);
 
     if (server == nullptr) {
       throw std::runtime_error("failed to dereference IServer");
@@ -731,8 +733,10 @@ private:
 
     reply_player_t player = CallPlayerHook(from);
 
-    if (player.senddefault) return PacketType::Good;
-    if (player.dontsend) return PacketType::Invalid;
+    if (player.senddefault)
+      return PacketType::Good;
+    if (player.dontsend)
+      return PacketType::Invalid;
 
     BuildReplyPlayerPacket(player);
 
@@ -1385,14 +1389,12 @@ static bool CheckChallengeNr(const netadr_t &adr, const int nChallengeValue) {
 }
 
 void Initialize(GarrysMod::Lua::ILuaBase *LUA) {
-  lua = static_cast<GarrysMod::Lua::ILuaInterface *>(LUA);
-
   LUA->GetField(GarrysMod::Lua::INDEX_GLOBAL, "VERSION");
   const char *game_version = LUA->CheckString(-1);
 
   bool errored = false;
   try {
-    Core::Singleton = std::make_unique<Core>(game_version);
+    Core::Singleton = std::make_unique<Core>(game_version, LUA);
   } catch (const std::exception &e) {
     errored = true;
     LUA->PushString(e.what());
