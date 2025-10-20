@@ -589,6 +589,7 @@ private:
   IServerGameDLL *gamedll = nullptr;
   IVEngineServer *engine_server = nullptr;
   IFileSystem *filesystem = nullptr;
+  GarrysMod::Lua::ILuaInterface *lua = nullptr;
 
   static inline const char *IPToString(const in_addr &addr) {
     static std::array<char, INET_ADDRSTRLEN> buffer{};
@@ -1384,6 +1385,8 @@ static bool CheckChallengeNr(const netadr_t &adr, const int nChallengeValue) {
 }
 
 void Initialize(GarrysMod::Lua::ILuaBase *LUA) {
+  lua = static_cast<GarrysMod::Lua::ILuaInterface *>(LUA);
+
   LUA->GetField(GarrysMod::Lua::INDEX_GLOBAL, "VERSION");
   const char *game_version = LUA->CheckString(-1);
 
