@@ -1,8 +1,8 @@
-# gmsv_serversecure
+# gmsv_serversecure (+ A2S_PLAYER modification hook)
 
 [![Build Status](https://metamann.visualstudio.com/GitHub%20danielga/_apis/build/status/danielga.gmsv_serversecure?branchName=master)](https://metamann.visualstudio.com/GitHub%20danielga/_build/latest?definitionId=7&branchName=master)
 
-A module for Garry's Mod that mitigates exploits on the Source engine.
+A module for Garry's Mod that mitigates exploits on the Source engine. Also includes `A2S_PLAYER` hook from gmsv_query.
 
 Based on these plugins from AzuiSleet:
 

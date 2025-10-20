@@ -468,7 +468,22 @@ private:
     server_tags_t tags;
   };
 
-  enum class PacketType { Invalid = -1, Good, Info };
+  struct player_t {
+    uint8_t index;
+    std::string name;
+    double score;
+    double time;
+  };
+
+  struct reply_player_t {
+    bool dontsend;
+    bool senddefault;
+
+    uint8_t count;
+    std::vector<player_t> players;
+  };
+
+  enum class PacketType { Invalid = -1, Good, Info, Player };
 
   using recvfrom_t = ssize_t(SERVERSECURE_CALLING_CONVENTION *)(
       SOCKET, void *, recvlen_t, int32_t, sockaddr *, socklen_t *);
@@ -559,6 +574,12 @@ private:
   uint32_t info_cache_last_update = 0;
   uint32_t info_cache_time = 5;
 
+  reply_player_t reply_player;
+  std::array<char, 1024> player_cache_buffer{};
+  bf_write player_cache_packet =
+      bf_write(player_cache_buffer.data(),
+               static_cast<int32_t>(player_cache_buffer.size()));
+
   ClientManager client_manager;
 
   bool packet_sampling_enabled = false;
@@ -595,6 +616,22 @@ private:
     return PacketType::Invalid; // we've handled it
   }
 
+  void BuildReplyPlayerPacket(reply_player_t r_player) {
+    player_cache_packet.Reset();
+
+    player_cache_packet.WriteLong(-1);  // connectionless packet header
+    player_cache_packet.WriteByte('D'); // packet type is always 'D'
+
+    player_cache_packet.WriteByte(r_player.count);
+    for (int i = 0; i < r_player.count; i++) {
+      player_t player = r_player.players[i];
+      player_cache_packet.WriteByte(i);
+      player_cache_packet.WriteString(player.name.c_str());
+      player_cache_packet.WriteLong(player.score);
+      player_cache_packet.WriteFloat(player.time);
+    }
+  }
+
   PacketType HandleInfoQuery(const sockaddr_in &from) {
     const auto time = static_cast<uint32_t>(Plat_FloatTime());
     if (!client_manager.CheckIPRate(from.sin_addr.s_addr, time)) {
@@ -608,6 +645,101 @@ private:
     }
 
     return PacketType::Good;
+  }
+
+  reply_player_t CallPlayerHook(const sockaddr_in &from) {
+    reply_player_t newreply;
+    newreply.dontsend = false;
+    newreply.senddefault = true;
+
+    char hook[] = "A2S_PLAYER";
+
+    lua->GetField(GarrysMod::Lua::INDEX_GLOBAL, "hook");
+    if (!lua->IsType(-1, GarrysMod::Lua::Type::TABLE)) {
+      lua->Pop(1);
+      Warning("[ServerSecure:%s] Missing hook table!\n", hook);
+      return newreply;
+    }
+
+    lua->GetField(-1, "Run");
+    if (!lua->IsType(-1, GarrysMod::Lua::Type::FUNCTION)) {
+      lua->Pop(2);
+      Warning("[ServerSecure:%s] hook.Run is not a function!\n", hook);
+      return newreply;
+    } else {
+      lua->Remove(-2);
+      lua->PushString(hook);
+    }
+
+    lua->PushString(inet_ntoa(from.sin_addr));
+    lua->PushNumber(27015);
+
+    lua->CallFunctionProtected(3, 1, true);
+
+    if (lua->IsType(-1, GarrysMod::Lua::Type::BOOL)) {
+      if (!lua->GetBool(-1)) {
+        newreply.senddefault = false;
+        newreply.dontsend = true; // dont send when return false
+      }
+    } else if (lua->IsType(-1, GarrysMod::Lua::Type::TABLE)) {
+      newreply.senddefault = false;
+
+      int count = lua->ObjLen(-1);
+      newreply.count = count;
+
+      std::vector<player_t> newPlayers(count);
+
+      for (int i = 0; i < count; i++) {
+        player_t newPlayer;
+        newPlayer.index = i;
+
+        lua->PushNumber(i + 1);
+        lua->GetTable(-2);
+
+        lua->GetField(-1, "name");
+        newPlayer.name = lua->GetString(-1);
+        lua->Pop(1);
+
+        lua->GetField(-1, "score");
+        newPlayer.score = lua->GetNumber(-1);
+        lua->Pop(1);
+
+        lua->GetField(-1, "time");
+        newPlayer.time = lua->GetNumber(-1);
+        lua->Pop(1);
+
+        lua->Pop(1);
+        newPlayers.at(i) = newPlayer;
+      }
+
+      newreply.players = newPlayers;
+    }
+
+    lua->Pop(1);
+
+    return newreply;
+  }
+
+  PacketType HandlePlayerQuery(const sockaddr_in &from) {
+    const auto time = static_cast<uint32_t>(Plat_FloatTime());
+    if (!client_manager.CheckIPRate(from.sin_addr.s_addr, time)) {
+      DevWarning(2, "[ServerSecure] Client %s hit rate limit\n",
+                 IPToString(from.sin_addr));
+      return PacketType::Invalid;
+    }
+
+    reply_player_t player = CallPlayerHook(from);
+
+    if (player.senddefault) return PacketType::Good;
+    if (player.dontsend) return PacketType::Invalid;
+
+    BuildReplyPlayerPacket(player);
+
+    sendto(game_socket, reinterpret_cast<char *>(player_cache_packet.GetData()),
+           player_cache_packet.GetNumBytesWritten(), 0,
+           reinterpret_cast<const sockaddr *>(&from), sizeof(from));
+
+    return PacketType::Invalid;
   }
 
   PacketType ClassifyPacket(const uint8_t *data, int32_t len,
@@ -669,6 +801,14 @@ private:
         return PacketType::Info;
 
       case 'U': // player info request (A2S_PLAYER)
+        if (len != 9 && len != 1200) {
+          DevWarning("[ServerSecure] Bad OOB! len: %d, channel: 0x%X, type: %c "
+                     "from %s\n",
+                     len, channel, type, IPToString(from.sin_addr));
+          return PacketType::Invalid;
+        }
+
+        return PacketType::Player;
       case 'V': // rules request (A2S_RULES)
         if (len != 9 && len != 1200) {
           DevWarning("[ServerSecure] Bad OOB! len: %d, channel: 0x%X, type: %c "
@@ -869,6 +1009,8 @@ private:
     PacketType type = ClassifyPacket(buffer, len, infrom);
     if (type == PacketType::Info) {
       type = HandleInfoQuery(infrom);
+    } else if (type == PacketType::Player) {
+      type = HandlePlayerQuery(infrom);
     }
 
     return type != PacketType::Invalid ? len : -1;
