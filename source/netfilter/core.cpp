@@ -6,6 +6,7 @@
 #include <GarrysMod/FunctionPointers.hpp>
 #include <GarrysMod/InterfacePointers.hpp>
 #include <GarrysMod/Lua/Interface.h>
+#include <GarrysMod/Lua/LuaInterface.h>
 #include <Platform.hpp>
 
 #include <detouring/classproxy.hpp>
